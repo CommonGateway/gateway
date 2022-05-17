@@ -51,6 +51,11 @@ class ObjectEntityService
 
     /**
      * Add services for using the handleObject function todo: temp fix untill we no longer use these services here.
+     *
+     * @param ValidationService $validationService
+     * @param EavService        $eavService
+     *
+     * @return $this
      */
     public function addServices(ValidationService $validationService, EavService $eavService): ObjectEntityService
     {
@@ -102,6 +107,13 @@ class ObjectEntityService
         return $result;
     }
 
+    /**
+     * @TODO
+     *
+     * @param ObjectEntity $result
+     *
+     * @return bool
+     */
     public function checkOwner(ObjectEntity $result): bool
     {
         // TODO: what if somehow the owner of this ObjectEntity is null? because of ConvertToGateway ObjectEntities for example?
@@ -114,6 +126,14 @@ class ObjectEntityService
         return false;
     }
 
+    /**
+     * @TODO
+     *
+     * @param string     $uri
+     * @param array|null $fields
+     *
+     * @return array
+     */
     public function getObjectByUri(string $uri, ?array $fields = null): array
     {
         $object = $this->entityManager->getRepository('App:ObjectEntity')->findOneBy(['uri' => $uri]);
@@ -124,6 +144,15 @@ class ObjectEntityService
         return [];
     }
 
+    /**
+     * @TODO
+     *
+     * @param Entity     $entity
+     * @param string     $id
+     * @param array|null $fields
+     *
+     * @return array
+     */
     public function getObject(Entity $entity, string $id, ?array $fields = null): array
     {
         $object = $this->entityManager->getRepository('App:ObjectEntity')->findOneBy(['entity' => $entity, 'id' => $id]);
@@ -134,6 +163,14 @@ class ObjectEntityService
         return [];
     }
 
+    /**
+     * @TODO
+     *
+     * @param string     $id
+     * @param array|null $fields
+     *
+     * @return array
+     */
     public function getPersonObject(string $id, ?array $fields = null): array
     {
         $entity = $this->entityManager->getRepository('App:Entity')->findOneBy(['function' => 'person']);
@@ -144,9 +181,17 @@ class ObjectEntityService
         return [];
     }
 
+    /**
+     * @TODO
+     *
+     * @param string     $id
+     * @param array|null $fields
+     *
+     * @return array
+     */
     public function getOrganizationObject(string $id, ?array $fields = null): array
     {
-        $entity = $this->entityManager->getRepository('App:Entity')->findOneBy(['function' => 'organization']);
+        $entity = $this->entityManager->getRepository('App:Entity')->findOneBy(['function' => 'organization']); //todo cache this!?
         if ($entity instanceof Entity) {
             return $this->getObject($entity, $id, $fields);
         }
@@ -154,6 +199,14 @@ class ObjectEntityService
         return [];
     }
 
+    /**
+     * @TODO
+     *
+     * @param string     $username
+     * @param array|null $fields
+     *
+     * @return array
+     */
     public function getUserObjectEntity(string $username, ?array $fields = null): array
     {
         // Because inversedBy wil not set the UC->user->person when creating a person with a user in the gateway.
@@ -176,6 +229,11 @@ class ObjectEntityService
         return [];
     }
 
+    /**
+     * @TODO
+     *
+     * @return array
+     */
     private function getFilterFromParameters(): array
     {
         if ($parameters = $this->session->get('parameters')) {
@@ -243,7 +301,11 @@ class ObjectEntityService
         if ((!isset($object) || !$object->getUri()) || !$this->checkOwner($object)) {
             try {
                 //TODO what to do if we do a get collection and want to show objects this user is the owner of, but not any other objects?
-                $this->authorizationService->checkAuthorization($this->authorizationService->getRequiredScopes($this->request->getMethod(), null, $entity));
+                $this->authorizationService->checkAuthorization([
+                    'method' => $method,
+                    'entity' => $entity,
+                    'object' => $object ?? null,
+                ]);
             } catch (AccessDeniedException $e) {
                 throw new GatewayException($e->getMessage(), null, null, ['data' => null, 'path' => $entity->getName(), 'responseType' => Response::HTTP_FORBIDDEN]);
             }
