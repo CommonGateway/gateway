@@ -14,6 +14,7 @@ use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\ORM\EntityManagerInterface;
 use Ramsey\Uuid\Uuid;
 use ReflectionClass;
+use Symfony\Component\Cache\Adapter\AdapterInterface as CacheInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\Session\SessionInterface;
@@ -27,14 +28,16 @@ class ResponseService
     private AuthorizationService $authorizationService;
     private SessionInterface $session;
     private TokenStorageInterface $tokenStorage;
+    private CacheInterface $cache;
 
-    public function __construct(EntityManagerInterface $em, CommonGroundService $commonGroundService, AuthorizationService $authorizationService, SessionInterface $session, TokenStorageInterface $tokenStorage)
+    public function __construct(EntityManagerInterface $em, CommonGroundService $commonGroundService, AuthorizationService $authorizationService, SessionInterface $session, TokenStorageInterface $tokenStorage, CacheInterface $cache)
     {
         $this->em = $em;
         $this->commonGroundService = $commonGroundService;
         $this->authorizationService = $authorizationService;
         $this->session = $session;
         $this->tokenStorage = $tokenStorage;
+        $this->cache = $cache;
     }
 
     // todo remove responseService from the ObjectEntityService, so we can use the ObjectEntityService->checkOwner() function here
@@ -63,9 +66,10 @@ class ResponseService
      */
     // Old $MaxDepth;
 //    public function renderResult(ObjectEntity $result, $fields, ArrayCollection $maxDepth = null, bool $flat = false, int $level = 0): array
-    public function renderResult(ObjectEntity $result, $fields, bool $skipAuthCheck = false, bool $flat = false, int $level = 0): array
+    public function renderResult(ObjectEntity $result, ?array $fields, bool $skipAuthCheck = false, bool $flat = false, int $level = 0): array
     {
         $response = [];
+
         if (
             $result->getEntity()->getGateway() !== null &&
             ($result->getEntity()->getGateway()->getType() == 'soap' ||
@@ -76,7 +80,7 @@ class ResponseService
         }
 
         // Make sure to break infinite render loops! ('New' MaxDepth)
-        if ($level > 2) {
+        if ($level > 3) {
             return [
                 '@id' => ucfirst($result->getEntity()->getName()).'/'.$result->getId(),
             ];
@@ -93,29 +97,11 @@ class ResponseService
             }
 
             // Only render the attributes that are available for this Entity (filters out unwanted properties from external results)
-            if (!is_null($result->getEntity()->getAvailableProperties())) {
-                $response = array_filter($response, function ($propertyName) use ($result) {
-                    return in_array($propertyName, $result->getEntity()->getAvailableProperties());
+            if (!is_null($result->getEntity()->getAvailableProperties() || !empty($fields))) {
+                $response = array_filter($response, function ($propertyName) use ($result, $fields) {
+                    return (empty($fields) || array_key_exists($propertyName, $fields)) &&
+                        (empty($result->getEntity()->getAvailableProperties()) || in_array($propertyName, $result->getEntity()->getAvailableProperties()));
                 }, ARRAY_FILTER_USE_KEY);
-            }
-
-            // Lets make sure we don't return stuf thats not in our field list
-            // @todo make array filter instead of loop
-            // @todo on a higher lever we schould have a filter result function that can also be aprouched by the authentication
-            foreach ($response as $key => $value) {
-                if (is_array($fields) && !array_key_exists($key, $fields)) {
-                    unset($response[$key]);
-                }
-
-                // Make sure we filter out properties we are not allowed to see
-                $attribute = $this->em->getRepository('App:Attribute')->findOneBy(['name' => $key, 'entity' => $result->getEntity()]);
-                if (!$skipAuthCheck && !empty($attribute)) {
-                    try {
-                        $this->authorizationService->checkAuthorization($this->authorizationService->getRequiredScopes('GET', $attribute));
-                    } catch (AccessDeniedException $exception) {
-                        unset($response[$key]);
-                    }
-                }
             }
         }
 
@@ -188,7 +174,7 @@ class ResponseService
      */
     // Old $MaxDepth;
 //    private function renderValues(ObjectEntity $result, $fields, ?ArrayCollection $maxDepth = null, bool $flat = false, int $level = 0): array
-    private function renderValues(ObjectEntity $result, $fields, bool $skipAuthCheck = false, bool $flat = false, int $level = 0): array
+    private function renderValues(ObjectEntity $result, ?array $fields, bool $skipAuthCheck = false, bool $flat = false, int $level = 0): array
     {
         $response = [];
 
@@ -211,32 +197,28 @@ class ResponseService
 
             // Check if user is allowed to see this
             try {
-                if (!$skipAuthCheck) {
-                    $this->authorizationService->checkAuthorization($this->authorizationService->getRequiredScopes('GET', $attribute));
+                if (!$skipAuthCheck && !$this->checkOwner($result)) {
+                    $this->authorizationService->checkAuthorization(['attribute' => $attribute, 'object' => $result]);
                 }
             } catch (AccessDeniedException $exception) {
                 continue;
             }
 
             // Lets deal with subfields filtering
-            $subfields = false;
-            if (is_array($fields) and array_key_exists($attribute->getName(), $fields)) {
-                $subfields = $fields[$attribute->getName()];
-            }
-            if (!$subfields) {
-                $subfields = $fields;
+            $subfields = null;
+            if (is_array($fields) && array_key_exists($attribute->getName(), $fields)) {
+                if (is_array($fields[$attribute->getName()])) {
+                    $subfields = $fields[$attribute->getName()];
+                } elseif ($fields[$attribute->getName()] == false) {
+                    continue;
+                }
             }
 
             $valueObject = $result->getValueByAttribute($attribute);
             if ($attribute->getType() == 'object') {
-                try {
-                    // if you have permission to see the entire parent object, you are allowed to see it's attributes, but you might not have permission to see that property if it is an object
-                    if (!$skipAuthCheck && !$this->checkOwner($result)) {
-                        $this->authorizationService->checkAuthorization($this->authorizationService->getRequiredScopes('GET', $attribute));
-                    }
-                    $response[$attribute->getName()] = $this->renderObjects($valueObject, $subfields, $skipAuthCheck, $flat, $level);
+                $response[$attribute->getName()] = $this->renderObjects($result, $valueObject, $subfields, $skipAuthCheck, $flat, $level);
 
-                    // Old $MaxDepth;
+                // Old $MaxDepth;
 //                    // TODO: this code might cause for very slow api calls, another fix could be to always set inversedBy on both (sides) attributes so we only have to check $attribute->getInversedBy()
 //                    // If this attribute has no inversedBy but the Object we are rendering has parent objects.
 //                    // Check if one of the parent objects has an attribute with inversedBy -> this attribute.
@@ -272,10 +254,7 @@ class ResponseService
 //                    if ($response[$attribute->getName()] === ['continue' => 'continue']) {
 //                        unset($response[$attribute->getName()]);
 //                    }
-                    continue;
-                } catch (AccessDeniedException $exception) {
-                    continue;
-                }
+                continue;
             } elseif ($attribute->getType() == 'file') {
                 $response[$attribute->getName()] = $this->renderFiles($valueObject);
                 continue;
@@ -299,7 +278,7 @@ class ResponseService
      */
     // Old $MaxDepth;
 //    private function renderObjects(Value $value, $fields, ?ArrayCollection $maxDepth, bool $flat = false, int $level = 0): ?array
-    private function renderObjects(Value $value, $fields, bool $skipAuthCheck = false, bool $flat = false, int $level = 0): ?array
+    private function renderObjects(ObjectEntity $result, Value $value, ?array $fields, bool $skipAuthCheck = false, bool $flat = false, int $level = 0): ?array
     {
         $attribute = $value->getAttribute();
 
@@ -309,28 +288,42 @@ class ResponseService
 
         // If we have only one Object (because multiple = false)
         if (!$attribute->getMultiple()) {
-            return $this->renderResult($value->getValue(), $fields, $skipAuthCheck, $flat, $level);
+            try {
+                // if you have permission to see the entire parent object, you are allowed to see it's attributes, but you might not have permission to see that property if it is an object
+                if (!$skipAuthCheck && !$this->checkOwner($result)) {
+                    $this->authorizationService->checkAuthorization(['entity' => $attribute->getObject(), 'object' => $value->getValue()]);
+                }
 
-            // Old $MaxDepth;
-//            // Do not call recursive function if we reached maxDepth (if we already rendered this object before)
-//            if ($maxDepth) {
-//                if (!$maxDepth->contains($value->getValue())) {
-//                    return $this->renderResult($value->getValue(), $fields, $maxDepth, $flat, $level);
+                return $this->renderResult($value->getValue(), $fields, $skipAuthCheck, $flat, $level);
+
+                // Old $MaxDepth;
+//                // Do not call recursive function if we reached maxDepth (if we already rendered this object before)
+//                if ($maxDepth) {
+//                    if (!$maxDepth->contains($value->getValue())) {
+//                        return $this->renderResult($value->getValue(), $fields, $maxDepth, $flat, $level);
+//                    }
+//
+//                    return ['continue' => 'continue']; //TODO NOTE: We want this here
 //                }
 //
-//                return ['continue' => 'continue']; //TODO NOTE: We want this here
-//            }
-//
-//            return $this->renderResult($value->getValue(), $fields, null, $flat, $level);
+//                return $this->renderResult($value->getValue(), $fields, null, $flat, $level);
+            } catch (AccessDeniedException $exception) {
+                return null;
+            }
         }
 
         // If we can have multiple Objects (because multiple = true)
         $objects = $value->getValue();
         $objectsArray = [];
         foreach ($objects as $object) {
-            $objectsArray[] = $this->renderResult($object, $fields, $skipAuthCheck, $flat, $level);
+            try {
+                // if you have permission to see the entire parent object, you are allowed to see it's attributes, but you might not have permission to see that property if it is an object
+                if (!$skipAuthCheck && !$this->checkOwner($result)) {
+                    $this->authorizationService->checkAuthorization(['entity' => $attribute->getObject(), 'object' => $object]);
+                }
+                $objectsArray[] = $this->renderResult($object, $fields, $skipAuthCheck, $flat, $level);
 
-            // Old $MaxDepth;
+                // Old $MaxDepth;
 //            // Do not call recursive function if we reached maxDepth (if we already rendered this object before)
 //            if ($maxDepth) {
 //                if (!$maxDepth->contains($object)) {
@@ -342,6 +335,9 @@ class ResponseService
 //                continue;
 //            }
 //            $objectsArray[] = $this->renderResult($object, $fields, null, $flat, $level);
+            } catch (AccessDeniedException $exception) {
+                continue;
+            }
         }
 
         return $objectsArray;
