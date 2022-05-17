@@ -252,7 +252,11 @@ class ValidationService
         if (!$dontCheckAuth) {
             try {
                 if (!$this->objectEntityService->checkOwner($objectEntity) && !($attribute->getDefaultValue() && $value === $attribute->getDefaultValue())) {
-                    $this->authorizationService->checkAuthorization($this->authorizationService->getRequiredScopes($objectEntity->getUri() ? 'PUT' : 'POST', $attribute));
+                    $this->authorizationService->checkAuthorization([
+                        'method'    => $objectEntity->getUri() ? 'PUT' : 'POST',
+                        'attribute' => $attribute,
+                        'value'     => $value,
+                    ]);
                 }
             } catch (AccessDeniedException $e) {
                 $objectEntity->addError($attribute->getName(), $e->getMessage());
@@ -503,7 +507,7 @@ class ValidationService
                     $this->createdObjects[] = $subObject;
                 }
 
-                $subObject = $this->validateEntity($subObject, $object, $dontCheckAuth);
+                $subObject->setSubresourceIndex($key);
 
                 !$dontCheckAuth && $this->objectEntityService->handleOwner($subObject); // Do this after all CheckAuthorization function calls
 
@@ -917,10 +921,10 @@ class ValidationService
     private function validateAttributeType(ObjectEntity $objectEntity, Attribute $attribute, $value, ?bool $dontCheckAuth = false): ObjectEntity
     {
         // Validation for enum (if attribute type is not object or boolean)
-        if ($attribute->getEnum() && !in_array($value, $attribute->getEnum()) && $attribute->getType() != 'object' && $attribute->getType() != 'boolean') {
-            $enumValues = '['.implode(', ', $attribute->getEnum()).']';
+        if ($attribute->getEnum() && !in_array(strtolower($value), array_map('strtolower', $attribute->getEnum())) && $attribute->getType() != 'object' && $attribute->getType() != 'boolean') {
+            $enumValues = '['.implode(', ', array_map('strtolower', $attribute->getEnum())).']';
             $errorMessage = $attribute->getMultiple() ? 'All items in this array must be one of the following values: ' : 'Must be one of the following values: ';
-            $objectEntity->addError($attribute->getName(), $errorMessage.$enumValues.' ('.$value.' is not).');
+            $objectEntity->addError($attribute->getName(), $errorMessage.$enumValues.' ('.strtolower($value).' is not).');
         }
 
         // Do validation for attribute depending on its type
@@ -1469,7 +1473,7 @@ class ValidationService
     private function validateAttributeFormat(ObjectEntity $objectEntity, Attribute $attribute, $value): ObjectEntity
     {
         // if no format is provided we dont validate TODO validate uri
-        if ($attribute->getFormat() == null || $attribute->getFormat() === 'uri') {
+        if ($attribute->getFormat() == null || in_array($attribute->getFormat(), ['uri', 'duration'])) {
             return $objectEntity;
         }
 
@@ -1485,7 +1489,9 @@ class ValidationService
         if (in_array($format, $allowedValidations)) {
             if ($format == 'dutch_pc4') {
                 //validate dutch_pc4
-                $this->validateDutchPC4($value);
+                if (!$this->validateDutchPC4($value)) {
+                    $objectEntity->addError($attribute->getName(), 'This is not a valid Dutch postalCode');
+                }
             } else {
                 try {
                     Validator::$format()->check($value);
@@ -1564,7 +1570,7 @@ class ValidationService
                     /* @todo the hacky hack hack */
                     // If it is a an internal url we want to us an internal id
                     if ($objectToUri->getEntity()->getGateway() == $objectEntity->getEntity()->getGateway()) {
-                        $ubjectUri = $objectToUri->getEntity()->getEndpoint().'/'.$this->commonGroundService->getUuidFromUrl($objectToUri->getUri());
+                        $ubjectUri = '/'.$objectToUri->getEntity()->getEndpoint().'/'.$this->commonGroundService->getUuidFromUrl($objectToUri->getUri());
                     } else {
                         $ubjectUri = $objectToUri->getUri();
                     }
@@ -1839,12 +1845,7 @@ class ValidationService
             return $objectEntity->getEntity()->getGateway()->getLocation().'/'.$objectEntity->getEntity()->getEndpoint().'/'.$objectEntity->getExternalId();
         }
 
-        if (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') {
-            $uri = 'https://';
-        } else {
-            $uri = 'http://';
-        }
-        $uri .= isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : 'localhost';
+        $uri = $_SERVER['HTTP_HOST'] === 'localhost' ? 'http://localhost' : 'https://'.$_SERVER['HTTP_HOST'];
 
         if ($objectEntity->getEntity()->getRoute()) {
             return $uri.$objectEntity->getEntity()->getRoute().'/'.$objectEntity->getId();
