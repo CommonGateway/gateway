@@ -1842,16 +1842,20 @@ class ValidationService
     public function createUri(ObjectEntity $objectEntity): string
     {
         if ($objectEntity->getEntity()->getGateway() && $objectEntity->getEntity()->getGateway()->getLocation() && $objectEntity->getEntity()->getGateway() && $objectEntity->getExternalId()) {
-            return $objectEntity->getEntity()->getGateway()->getLocation().'/'.$objectEntity->getEntity()->getEndpoint().'/'.$objectEntity->getExternalId();
+            return $objectEntity->getEntity()->getGateway()->getLocation() . '/' . $objectEntity->getEntity()->getEndpoint() . '/' . $objectEntity->getExternalId();
         }
 
-        $uri = $_SERVER['HTTP_HOST'] === 'localhost' ? 'http://localhost' : 'https://'.$_SERVER['HTTP_HOST'];
+        if (isset($_SERVER['HTTP_HOST'])) {
+            $uri = $_SERVER['HTTP_HOST'] === 'localhost' ? 'http://localhost' : 'https://' . $_SERVER['HTTP_HOST'];
+        } else {
+            $uri = 'http://localhost';
+        }
 
         if ($objectEntity->getEntity()->getRoute()) {
-            return $uri.$objectEntity->getEntity()->getRoute().'/'.$objectEntity->getId();
+            return $uri . $objectEntity->getEntity()->getRoute() . '/' . $objectEntity->getId();
         }
 
-        return $uri.'/admin/object_entities/'.$objectEntity->getId();
+        return $uri . '/admin/object_entities/' . $objectEntity->getId();
     }
 
     /**
