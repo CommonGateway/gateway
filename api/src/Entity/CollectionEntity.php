@@ -81,6 +81,16 @@ class CollectionEntity
      * @ORM\Column(type="string", length=255, nullable=true, options={"default":null})
      */
     private ?string $description = null;
+
+    /**
+     * @var ?string The description of this Collection
+     *
+     * @Assert\Type("string")
+     *
+     * @Groups({"read", "write"})
+     * @ORM\Column(type="string", length=255, nullable=true, options={"default":null})
+     */
+    private ?string $prefix = null;
     /**
      * @var ?string The location where the OAS can be loaded from
      *
@@ -230,7 +240,7 @@ class CollectionEntity
     {
         if ($this->getSource() !== null) {
             $source = $this->getSource()->getId()->toString();
-            $source = '@'.$source;
+            $source = '@' . $source;
         } else {
             $source = null;
         }
@@ -282,6 +292,18 @@ class CollectionEntity
     public function setDescription(?string $description): self
     {
         $this->description = $description;
+
+        return $this;
+    }
+
+    public function getPrefix(): ?string
+    {
+        return $this->prefix;
+    }
+
+    public function setPrefix(?string $prefix): self
+    {
+        $this->prefix = $prefix;
 
         return $this;
     }

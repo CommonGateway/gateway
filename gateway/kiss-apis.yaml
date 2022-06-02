@@ -1,11 +1,12 @@
-# App\Entity\CollectionEntity:
-#     zrcCollection:
-#         name: zrc collection 
-#         sourceType: GitHub
-#         locationOAS: https://raw.githubusercontent.com/VNG-Realisatie/gemma-zaken/master/api-specificatie/zrc/1.2.x/openapi.yaml
-#         testDataLocation: https://raw.githubusercontent.com/ConductionNL/zrc_publiccode/main/data/zrc.json
-#         loadTestData: true
-#         autoLoad: true
+App\Entity\CollectionEntity:
+    zrcCollection:
+        name: zrc collection 
+        prefix: zrc
+        sourceType: GitHub
+        locationOAS: https://raw.githubusercontent.com/VNG-Realisatie/gemma-zaken/master/api-specificatie/zrc/1.2.x/openapi.yaml
+        testDataLocation: https://raw.githubusercontent.com/ConductionNL/zrc_publiccode/main/data/zrc.json
+        loadTestData: true
+        autoLoad: true
 
 #     ztcCollection:
 #         name: ZTC collection 

@@ -538,10 +538,11 @@ class OasParserService
      */
     private function createEndpoint(string $path, string $methodName, array $method, CollectionEntity $collection): Endpoint
     {
+        $collection->getPrefix() && $path = '/' . $collection->getPrefix() . $path;
         $pathArray = array_values(array_filter(explode('/', $path)));
         $endpoint = new Endpoint();
         $endpoint->addCollection($collection);
-        $endpoint->setName($path.' '.$methodName);
+        $endpoint->setName($path . ' ' . $methodName);
         $endpoint->setMethod($methodName);
         $endpoint->setPath($pathArray);
 
